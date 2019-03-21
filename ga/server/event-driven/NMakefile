@@ -1,8 +1,8 @@
 
 !include <..\NMakefile.def>
 
-CXX_FLAGS	= $(CXX_FLAGS) -I"C:\Microsoft DirectX SDK\Include"
-LIB_PATH	= $(LIB_PATH) /libpath:..\..\core /libpath:"C:\Microsoft DirectX SDK\Lib\$(GA_PLATFORM)"
+CXX_FLAGS	= $(CXX_FLAGS) -I"C:\Program Files (x86)\Microsoft DirectX SDK (June 2010)\Include"
+LIB_PATH	= $(LIB_PATH) /libpath:..\..\core /libpath:"C:\Program Files (x86)\Microsoft DirectX SDK (June 2010)\Lib\$(GA_PLATFORM)"
 LIBS		= $(LIB_SYSTEM) $(LIB_SDL) $(LIB_FFMPEG) $(LIB_PTHREAD) \
 		  libga.lib $(LIB_D3D) EasyHook$(GA_CPUBITS).lib
 #LDFLAGS	= -rdynamic -L../../core -Wl,--whole-archive -lga -Wl,--no-whole-archive $(AVCLD) $(SDLLD)
