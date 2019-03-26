@@ -116,7 +116,7 @@ encoder_register_vencoder(ga_module_t *m, void *param) {
  * @return Currently it always returns 0.
  *
  * The encoder module is launched when a client is conneted.
- * The \a param is passed to the encoer module when the module is launched.
+ * The \a param is passed to the encoder module when the module is launched.
  */
 int
 encoder_register_aencoder(ga_module_t *m, void *param) {
@@ -301,6 +301,7 @@ encoder_unregister_client(void /*RTSPContext*/ *rtsp) {
  * from 0 to \a N-1, where \a N is the number of video tracks (usually 1).
  * A audio packet usually uses a channel id of \a N.
  */
+// equavilent to ::encoder_pktqueue_append(channelId, pkt, encoderPts, ptv);
 int
 encoder_send_packet(const char *prefix, int channelId, AVPacket *pkt, int64_t encoderPts, struct timeval *ptv) {
 	if(sinkserver) {
@@ -399,7 +400,9 @@ encoder_ptv_get(unsigned queueid, long long pts, struct timeval *ptv, int interp
 // encoder packet queue functions - for async packet delivery
 static int pktqueue_initqsize = -1;
 static int pktqueue_initchannels = -1;
+// a circular queue to store actual pkt data
 static encoder_packet_queue_t pktqueue[VIDEO_SOURCE_CHANNEL_MAX+1];
+// pointers to start address of each pkt in the queue: pktqueue
 static list<encoder_packet_t> pktlist[VIDEO_SOURCE_CHANNEL_MAX+1];
 static map<qcallback_t,qcallback_t>queue_cb[VIDEO_SOURCE_CHANNEL_MAX+1];
 
@@ -503,7 +506,9 @@ encoder_pktqueue_append(int channelId, AVPacket *pkt, int64_t encoderPts, struct
 	pthread_mutex_lock(&q->mutex);
 size_check:
 	// size checking
-	if(q->datasize + pkt->size > q->bufsize) {
+	// prevent overwritting existing data
+    // checking for head space if come from goto size_check.
+    if(q->datasize + pkt->size > q->bufsize) {
 		pthread_mutex_unlock(&q->mutex);
 		ga_error("encoder: packet queue #%d full, packet dropped (%d+%d)\n",
 			channelId, q->datasize, pkt->size);
@@ -523,7 +528,8 @@ size_check:
 	}
 	bcopy(pkt->data, q->buf + q->tail, pkt->size);
 	//
-	qp.data = q->buf + q->tail;
+	// point to the start address of the pkt in the queue
+    qp.data = q->buf + q->tail;
 	qp.size = pkt->size;
 	qp.pts_int64 = pkt->pts;
 	if(ptv != NULL) {

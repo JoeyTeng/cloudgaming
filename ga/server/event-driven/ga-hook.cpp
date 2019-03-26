@@ -633,6 +633,7 @@ hook_proc() {
 	return 0;
 }
 
+// entry point
 MODULE MODULE_EXPORT void WINAPI
 NativeInjectionEntryPoint(REMOTE_ENTRY_INFO *info) {
 	if(hook_proc() < 0)

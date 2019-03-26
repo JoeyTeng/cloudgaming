@@ -83,6 +83,10 @@ audio_source_buffer_deinit(audio_buffer_t *ab) {
 
 void
 audio_source_buffer_fill_one(audio_buffer_t *ab, const unsigned char *data, int frames) {
+	// [out]audio_buffer_t *ab is a circular-queue-like buffer.
+	// Yet, bufhead <= buftail is GUARANTEED 
+	// as data would be shifted to [0] when there is insufficient tail space.
+	// [in]data; [in]frames: counter for the number of frames written.
 	int headspace, tailspace;
 	int framesize;
 	if(ab == NULL)
@@ -125,6 +129,7 @@ retry:
 
 void
 audio_source_buffer_fill(const unsigned char *data, int frames) {
+	// [in]data; [in]frames: counter for the number of frames written.
 	map<long,audio_buffer_t*>::iterator mi;
 	pthread_mutex_lock(&ccmutex);
 	for(mi = gClients.begin(); mi != gClients.end(); mi++) {
@@ -235,6 +240,7 @@ audio_source_channels() {
 	return gChannels;
 }
 
+// all arguments are from rtspconf_global()
 int
 audio_source_setup(int chunksize, int samplerate, int bitspersample, int channels) {
 	gChunksize = chunksize;

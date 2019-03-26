@@ -72,6 +72,7 @@ aencoder_deinit(void *arg) {
 	return 0;
 }
 
+// entry point: on init.
 static int
 aencoder_init(void *arg) {
 	struct RTSPConf *rtspconf = rtspconf_global();
@@ -143,6 +144,7 @@ aencoder_init(void *arg) {
 	} while(0);
 #endif
 	// need live format conversion?
+	// encoder->sample_fmt = rtsp_audio_codec_format
 	if(rtspconf->audio_device_format != encoder->sample_fmt) {
 		if((swrctx = swr_alloc_set_opts(NULL, 
 				encoder->channel_layout,
@@ -205,8 +207,18 @@ aencoder_threadproc(void *arg) {
 	unsigned char *buf = NULL;
 	int bufsize;
 	// buffer used to store captured data
-	unsigned char *samples = NULL;
-	int nsamples, samplebytes, maxsamples, samplesize;
+	// only store at most one frame of data
+    unsigned char *samples = NULL;
+    // the number of samples that had been filled in buffer: samples (queued to be encoded)
+    int nsamples;
+    // the size of samples that had been filled in buffer: samples (queued to be encoded)
+    // and have not been copied to snd_in for encoder to consume.
+    int samplebytes;
+    // the number of samples per channel in an audio frame (encoder->frame_size)
+    int maxsamples;
+    // the size of samples in one frame (all (both) channels included) in bytes
+    // same as the size of the buffer: samples
+    int samplesize;
 	int offset;
 	// for a/v sync
 #ifdef WIN32
@@ -226,6 +238,7 @@ aencoder_threadproc(void *arg) {
 	maxsamples = encoder->frame_size;
 	samplesize = encoder->frame_size * audio_source_channels() * audio_source_bitspersample() / 8;
 	//
+	// pts = Presentation timestamp, for a/v synchronization.
 	encoder_pts_clear(rtp_id);
 	//
 	if((ab = audio_source_buffer_init()) == NULL) {
@@ -270,6 +283,8 @@ aencoder_threadproc(void *arg) {
 			buffer_purged = 1;
 		}
 		// read audio frames
+        // [in]audio_buffer_t ab, [out]buf (samples+samplebyts), [arg]frames: free space available for #frames
+        // ensure that all data in buffer are dumped/one whole frame of data are filled
 		r = audio_source_buffer_read(ab, samples + samplebytes, maxsamples - nsamples);
 		gettimeofday(&tv, NULL);
 		if(r <= 0) {
@@ -303,7 +318,9 @@ aencoder_threadproc(void *arg) {
 		nsamples += r;
 		samplebytes += r*frameunit;
 		offset = 0;
-		while(nsamples >= encoder->frame_size) {
+        // only proceed when there is enough data for at least one frame.
+        // the loop usually runs only one iteration since nsamples usually <= encoder->framesize
+        while(nsamples >= encoder->frame_size) {
 			AVPacket pkt1, *pkt = &pkt1;
 			unsigned char *srcbuf;
 			int srcsize;
@@ -313,7 +330,8 @@ aencoder_threadproc(void *arg) {
 			snd_in->format = encoder->sample_fmt;
 			snd_in->channel_layout = encoder->channel_layout;
 			//
-			srcbuf = samples+offset;
+			// offset should always be 0 since the loop is always runned once only
+            srcbuf = samples+offset;
 			srcsize = source_size;
 			//
 			if(swrctx != NULL) {
@@ -321,10 +339,12 @@ aencoder_threadproc(void *arg) {
 				// assume source is always in packed (interleaved) format
 				srcplanes[0] = srcbuf;
 				srcplanes[1] = NULL;
+                // encoder->frame_size is set by ga_avcodec_aencoder_init() called by aencoder_init()
+                // this value is dependent on rtspconf->audio_encoder_codec/(audio_codec_format == encoder=>sample_fmt) (all are consistent)
 				swr_convert(swrctx, dstplanes, encoder->frame_size,
 						    srcplanes, encoder->frame_size);
-				srcbuf = convbuf;
-				srcsize = encoder_size;
+				srcbuf = convbuf; // convbuf == dstplanes[0], set in aencoder_init()
+				srcsize = encoder_size; // allocated size of convbuf
 			}
 			//
 			if(avcodec_fill_audio_frame(snd_in, encoder->channels,
@@ -336,7 +356,8 @@ aencoder_threadproc(void *arg) {
 			snd_in->pts = pts;
 			encoder_pts_put(rtp_id, pts, &tv);
 			//
-			pkt->data = buf;
+			// no need to clean buf in advance?
+            pkt->data = buf;
 			pkt->size = bufsize;
 			got_packet = 0;
 			if(avcodec_encode_audio2(encoder, pkt, snd_in, &got_packet) != 0) {
@@ -363,7 +384,8 @@ aencoder_threadproc(void *arg) {
 				gettimeofday(&tv, NULL);
 			}
 			// send the packet
-			if(encoder_send_packet("audio-encoder",
+			// equavilent to encoder-common::encoder_pktqueue_append(rtp_id, pkt, pts/pkt->pts, &tv);
+            if(encoder_send_packet("audio-encoder",
 				rtp_id/*rtspconf->audio_id*/, pkt,
 				/*encoder->coded_frame->*/pkt->pts == AV_NOPTS_VALUE ? pts : /*encoder->coded_frame->*/pkt->pts,
 				&tv) < 0) {
@@ -381,7 +403,10 @@ drop_audio_frame:
 		}
 		// if something has been processed
 		if(offset > 0) {
-			if(samplebytes-offset > 0) {
+			// should always be 0 since samples only store one frame of data
+            // and this amount are consumed exactly during encoding process
+            if(samplebytes-offset > 0) {
+                // shift the remainder to the head
 				bcopy(&samples[offset], samples, samplebytes-offset);
 			}
 			samplebytes -= offset;
@@ -399,6 +424,7 @@ audio_quit:
 	return NULL;
 }
 
+// entry point: on start
 static int
 aencoder_start(void *arg) {
 	if(aencoder_started != 0)
@@ -424,6 +450,7 @@ aencoder_stop(void *arg) {
 	return 0;
 }
 
+// entry point: on load
 ga_module_t *
 module_load() {
 	static ga_module_t m;

@@ -241,11 +241,13 @@ packet_queue_drop(PacketQueue *q) {
 			break;
 		pkt = q->queue.front();
 		q->queue.pop_front();
+		// q->size: total size of pkts
+		// q->queue.size(): total number of pkts in the queue
 		q->size -= pkt.size;
 		count++;
 	}
 	pthread_mutex_unlock(&q->mutex);
-	return count;
+	return count; // number of pkts dropped
 }
 
 UsageEnvironment&
@@ -1071,10 +1073,11 @@ play_video(int channel, unsigned char *buffer, int bufsize, struct timeval pts, 
 	return;
 }
 
+// ab = audio buffer (buffer size, buffer pos, etc.)
 static const int abmaxsize = AVCODEC_MAX_AUDIO_FRAME_SIZE*4;
 static unsigned char *audiobuf = NULL;
-static unsigned int absize = 0;
-static unsigned int abpos = 0;
+static unsigned int absize = 0; // only used in audio_buffer_fill()
+static unsigned int abpos = 0; // only used in audio_buffer_fill()
 // need a converter?
 static struct SwrContext *swrctx = NULL;
 static unsigned char *convbuf = NULL;
@@ -1097,15 +1100,22 @@ audio_buffer_decode(AVPacket *pkt, unsigned char *dstbuf, int dstlen) {
 	const unsigned char *srcplanes[SWR_CH_MAX];
 	unsigned char *dstplanes[SWR_CH_MAX];
 	unsigned char *saveptr;
-	int filled = 0;
+	int filled = 0; // length of data decoded (filled in dstbuf)
+	// static AVFrame *aframe = NULL; as global variable
 	//
-	saveptr = pkt->data;
+	rtsperror("audio decoder: calling audio_buffer_decode.\n");
+	saveptr = pkt->data; // used to reset the pointer after decoding
 	while(pkt->size > 0) {
 		int len, got_frame = 0;
 		unsigned char *srcbuf = NULL;
 		int datalen = 0;
 		//
-		av_frame_unref(aframe);
+		// this will reset aframe->format to -1 == AV_SAMPLE_FMT_NONE
+        av_frame_unref(aframe);
+		// call avcodec_decode_audio4 provided by FFmpeg in libavcodec/avcodec.h
+		// to decode audio. aframe[out], got_frame[out] as indicator, pkt[in]
+        // aframe->format == adecoder->sample_fmt when aframe->format == AV_SAMPLE_FMT_NONE
+        // av_frame_unref(aframe); would be called as well in the front of avcodec_decode_audio4()
 		if((len = avcodec_decode_audio4(adecoder, aframe, &got_frame, pkt)) < 0) {
 			rtsperror("decode audio failed.\n");
 			return -1;
@@ -1116,7 +1126,18 @@ audio_buffer_decode(AVPacket *pkt, unsigned char *dstbuf, int dstlen) {
 			continue;
 		}
 		//
+		/*rtsperror("audio decoder: source sample rate == target sample rate: %d.\n",
+			aframe->sample_rate == rtspconf->audio_samplerate);
+		rtsperror("audio decoder: source: %dch(%x)@%dHz (%s); target: %dch(%x)@%dHz (%s).\n",
+			(int)aframe->channels, (int)aframe->channel_layout, (int)aframe->sample_rate,
+			av_get_sample_fmt_name((AVSampleFormat)aframe->format),
+			(int)rtspconf->audio_channels,
+			(int)rtspconf->audio_device_channel_layout,
+			(int)rtspconf->audio_samplerate,
+			av_get_sample_fmt_name(rtspconf->audio_device_format));*/
 		if(aframe->format == rtspconf->audio_device_format) {
+			//&& aframe->sample_rate == rtspconf->audio_samplerate) {
+			rtsperror("audio decoder: no conversion.\n");
 			datalen = av_samples_get_buffer_size(NULL,
 					aframe->channels/*rtspconf->audio_channels*/,
 					aframe->nb_samples,
@@ -1125,6 +1146,7 @@ audio_buffer_decode(AVPacket *pkt, unsigned char *dstbuf, int dstlen) {
 		} else {
 			// aframe->format != rtspconf->audio_device_format
 			// need conversion!
+			//rtsperror("audio decoder: has conversion.\n");
 			if(swrctx == NULL) {
 				if((swrctx = swr_alloc_set_opts(NULL,
 						rtspconf->audio_device_channel_layout,
@@ -1204,21 +1226,22 @@ audio_buffer_decode(AVPacket *pkt, unsigned char *dstbuf, int dstlen) {
 		//
 		bcopy(srcbuf, dstbuf, datalen);
 		dstbuf += datalen;
-		dstlen -= datalen;
+		dstlen -= datalen; // dst buffer room left
 		filled += datalen;
 		//
 		pkt->size -= len;
 		pkt->data += len;
 	}
-	pkt->data = saveptr;
-	if(pkt->data)
+	pkt->data = saveptr; // reset pointer to init pos
+	if(pkt->data) // if pkt-> data != NULL ?
 		av_free_packet(pkt);
-	return filled;
+	return filled; // length of data decoded (filled in dstbuf)
 }
 
 int
 audio_buffer_fill(void *userdata, unsigned char *stream, int ssize) {
-	int filled = 0;
+	// decode data from avpkt and send to stream. stream[out]
+	int filled = 0; // counter for the size of data retrieved from stream
 	AVPacket avpkt;
 #ifdef ANDROID
 	// XXX: use global adecoder
@@ -1226,7 +1249,10 @@ audio_buffer_fill(void *userdata, unsigned char *stream, int ssize) {
 	AVCodecContext *adecoder = (AVCodecContext*) userdata;
 #endif
 	//
+	rtsperror("audio decoder: calling audio_buffer_fill.\n");
+
 	if(audio_buffer_init() == NULL) {
+		// init abuffer for decoding
 		rtsperror("audio decoder: cannot allocate audio buffer\n");
 #ifdef ANDROID
 		rtspParam->quitLive555 = 1;
@@ -1235,39 +1261,46 @@ audio_buffer_fill(void *userdata, unsigned char *stream, int ssize) {
 		exit(-1);
 #endif
 	}
+	// audiobuf shall be empty at first with absize == abpos == 0
+	// so in the first iteration, audiobuf is filled
 	while(filled < ssize) {
 		int dsize = 0, delta = 0;;
 		// buffer has enough data
 		if(absize - abpos >= ssize - filled) {
+			// buffer has enough data to fill into the stream
+			// since the stream is full, return.
 			delta = ssize - filled;
 			bcopy(audiobuf+abpos, stream, delta);
 			abpos += delta;
 			filled += delta;
 			return ssize;
 		} else if(absize - abpos > 0) {
+			// there are still some data left in buffer. dump all to stream
 			delta = absize - abpos;
 			bcopy(audiobuf+abpos, stream, delta);
 			stream += delta;
 			filled += delta;
-			abpos = absize = 0;
+			abpos = absize = 0;  // buffer is empty. reset indicators
 		}
 		// move data to head, leave more ab buffers
 		if(abpos != 0) {
+			// align remaining data in buffer to [0]
 			bcopy(audiobuf+abpos, audiobuf, absize-abpos);
 			absize -= abpos;
 			abpos = 0;
 		}
 		// decode more packets
 		if(packet_queue_get(&audioq, &avpkt, 0) <= 0)
-			break;
+			break; // endpoint for usual cases
 		if((dsize = audio_buffer_decode(&avpkt, audiobuf+absize, abmaxsize-absize)) < 0)
 			break;
-		absize += dsize;
+		absize += dsize; // more data are decoded and cached in buffer
 	}
 	//
 	return filled;
 }
 
+// callback function in ga-client::open_audio for SDL_OpenAudioDevice
 void
 audio_buffer_fill_sdl(void *userdata, unsigned char *stream, int ssize) {
 	int filled;
@@ -1276,9 +1309,11 @@ audio_buffer_fill_sdl(void *userdata, unsigned char *stream, int ssize) {
 		exit(-1);
 	}
 	if(image_rendered == 0) {
+		// skip these audio frames if corresponding images is lacking
 		bzero(stream, ssize);
 		return;
 	}
+	// prepare room for next audio frames
 	bzero(stream+filled, ssize-filled);
 	return;
 }
@@ -1303,7 +1338,7 @@ play_audio(unsigned char *buffer, int bufsize, struct timeval pts) {
 			audioq.queue.size(), audioq.size);
 #endif
 		packet_queue_put(&audioq, &avpkt);
-		packet_queue_drop(&audioq);
+		packet_queue_drop(&audioq); // prevent overflow of audioq. no risk of underflow.
 	}
 #ifndef ANDROID
 	if(rtspParam->audioOpened == false) {

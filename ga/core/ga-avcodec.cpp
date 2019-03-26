@@ -236,7 +236,8 @@ ga_avcodec_aencoder_init(AVCodecContext *ctx, AVCodec *codec, int bitrate, int s
 #endif
 
 	pthread_mutex_lock(&avcodec_open_mutex);
-	if(avcodec_open2(ctx, codec, &opts) != 0) {
+	// ctx(i.e. encoder)->frame_size is set here.
+    if(avcodec_open2(ctx, codec, &opts) != 0) {
 		avcodec_close(ctx);
 		av_free(ctx);
 		pthread_mutex_unlock(&avcodec_open_mutex);

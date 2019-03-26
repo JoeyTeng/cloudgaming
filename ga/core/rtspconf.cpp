@@ -116,6 +116,7 @@ rtspconf_load_codec(const char *key, const char *value,
 	} while(++idx<RTSPCONF_CODECNAME_SIZE && (token=strtok_r(NULL, DELIM, &saveptr))!=NULL);
 	names[idx] = NULL;
 	//
+	// [in] cid == AV_CODEC_ID_NONE => return NULL on "name not found"
 	if((*codec = finder(names, AV_CODEC_ID_NONE)) == NULL) {
 		ga_error("# RTSP[config]: no available %s codecs (%s).\n", key, value);
 		return -1;

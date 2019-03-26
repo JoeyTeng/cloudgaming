@@ -26,6 +26,7 @@
 
 int
 hook_and_launch(const char *ga_root, const char *config_path, const char *app_exe) {
+	// ga_root == loader_path == working dir for app_exe; app_exe may be a full path
 	PROCESS_INFORMATION procInfo;
 	STARTUPINFO startupInfo;
 	HINSTANCE hDLL;
@@ -47,6 +48,7 @@ hook_and_launch(const char *ga_root, const char *config_path, const char *app_ex
 	}
 
 	// handle environment variables
+	// do {} while(0): create a local scope for temporary variables
 	do {
 		char s_drive[_MAX_DRIVE], s_dir[_MAX_DIR], s_fname[_MAX_FNAME];
 		_splitpath(app_exe, s_drive, s_dir, s_fname, NULL);
@@ -77,9 +79,11 @@ hook_and_launch(const char *ga_root, const char *config_path, const char *app_ex
 
 	cmdline[0] = '\0';
 	cmdpos = 0;
+	// handle game execution arguments
 	if(ga_conf_mapsize("game-argv") > 0) {
 		int n;
 		ga_conf_mapreset("game-argv");
+		// return value: size of buffer written
 		cmdpos = snprintf(cmdline, cmdspace, "\"%s\"", app_exe);
 		for(	ptr = ga_conf_mapkey("game-argv", buf, sizeof(buf));
 			ptr != NULL && cmdpos < cmdspace;
@@ -110,6 +114,7 @@ hook_and_launch(const char *ga_root, const char *config_path, const char *app_ex
 	}
 	fwprintf(stderr, L"appexe: %s\n", app_exe_w);
 
+	// when there are args for launching game
 	if(cmdpos > 0) {
 		if(MultiByteToWideChar(CP_UTF8, 0, cmdline, -1, cmdline_w, sizeof(cmdline_w)/sizeof(wchar_t)) <= 0) {
 			fprintf(stderr, "error converting arguments to wchar_t.\n");
@@ -181,7 +186,10 @@ main(int argc, char *argv[]) {
 	}
 	// get loader's info
 	GetModuleFileName(NULL, loader_exe, sizeof(loader_exe));
+	// [in]'full' path, [out]drive, [out]dir, [out]fname, [out]extension
+	// NULL to ignore corresponding output
 	_splitpath(loader_exe, s_drive, s_dir, s_fname, NULL);
+	// print formatted string into buffer (argv[0]).
 	snprintf(loader_dir, sizeof(loader_dir), "%s%s", s_drive, s_dir);
 	fprintf(stderr, "Loader: %s (in %s)\n", loader_exe, loader_dir);
 

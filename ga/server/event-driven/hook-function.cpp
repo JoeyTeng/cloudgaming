@@ -30,6 +30,8 @@
 #include <GL/glu.h>
 
 // --- GetRawInputData ---
+// being set in hook_input()@ga_hook
+// pointer to the original function GetRawInputData@user32.dll
 TGetRawInputData pGetRawInputData = NULL;
 HANDLE tmpRawKeyDevice = NULL; 
 // --- DirectX 9 ---
@@ -964,6 +966,7 @@ DllExport HRESULT __stdcall hook_GetRawInputData(
 	)
 {
 	HRESULT hr;
+	// [out]pData, [out]pcbSize, [out]cbSizeHeader
 	hr = pGetRawInputData(hRawInput, uiCommand, pData, pcbSize, cbSizeHeader);
 
 	if (uiCommand == RID_INPUT && pData != NULL) {

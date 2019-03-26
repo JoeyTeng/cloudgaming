@@ -123,7 +123,7 @@ ca_create_swrctx(WAVEFORMATEX *w) {
 	} else {
 		ga_error("CoreAudio: resample context (%x,%d,%d) -> (%x,%d,%d)\n",
 			(int) CA2SWR_chlayout(w->nChannels),
-			(int) CA2SWR_format(w),
+			(int) CA2SWR_format(w), // AV_SAMPLE_FMT_FLT (3) for torchlight2
 			(int) w->nSamplesPerSec,
 			(int) rtspconf->audio_device_channel_layout,
 			(int) rtspconf->audio_device_format,
@@ -145,7 +145,7 @@ ca_create_swrctx(WAVEFORMATEX *w) {
 	bufreq = av_samples_get_buffer_size(NULL,
 			rtspconf->audio_channels, samples*2,
 			rtspconf->audio_device_format,
-			1/*no-alignment*/);
+			1/*no-alignment*/); // no-alignment => actual size of audio data
 	if((audio_buf = (unsigned char *) malloc(bufreq)) == NULL) {
 		ga_error("CoreAudio: cannot allocate resample memory.\n");
 		return -1;
@@ -181,6 +181,7 @@ hook_GetMixFormat(
 	return hr;
 }
 
+// address is set when hook_GetBuffer() is called.
 static char *buffer_data = NULL;
 static unsigned int buffer_frames = 0;
 
@@ -269,9 +270,11 @@ hook_coreaudio() {
 	CA_DO_HOOK(GetMixFormat);
 
 	old_GetBuffer = (t_GetBuffer) ((comobj_t*) renderClient)->vtbl->func[3];
+	// GetBuffer will be called each time *before* source fill in data.
 	CA_DO_HOOK(GetBuffer);
 
 	old_ReleaseBuffer = (t_ReleaseBuffer) ((comobj_t*) renderClient)->vtbl->func[4];
+	// ReleaseBuffer will be called each time *after* source fill in data.
 	CA_DO_HOOK(ReleaseBuffer);
 
 	ret = 0;
