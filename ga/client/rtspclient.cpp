@@ -358,7 +358,7 @@ init_vdecoder(int channel, const char *sprop) {
 		return -1;
 	}
 	video_codec_id = ga_lookup_codec_id(video_codec_name);
-	if((codec = ga_avcodec_find_decoder(names, AV_CODEC_ID_NONE)) == NULL) {
+	if((codec = ga_avcodec_find_decoder(names, video_codec_id)) == NULL) {
 		rtsperror("video decoder: cannot find the decoder for %s\n", video_codec_name);
 		return -1;
 	}
@@ -416,7 +416,7 @@ init_adecoder() {
 		return -1;
 	}
 	audio_codec_id = ga_lookup_codec_id(audio_codec_name);
-	if((codec = ga_avcodec_find_decoder(names, AV_CODEC_ID_NONE)) == NULL) {
+	if((codec = ga_avcodec_find_decoder(names, audio_codec_id)) == NULL) {
 		rtsperror("audio decoder: cannot find the decoder for %s\n", audio_codec_name);
 		return -1;
 	}
