@@ -6,6 +6,10 @@
 TARGET	= make_core make_module make_server make_client
 MAKEFILE= NMakefile
 
+rebuild: clean all install_executable_and_libs
+
+install: install_executable_and_libs install_configuration
+
 all: $(TARGET)
 
 make_core:
@@ -20,12 +24,14 @@ make_server: make_core
 make_client: make_core
 	cd client && nmake /f $(MAKEFILE) && cd ..
 
-install:
+install_executable_and_libs:
 	-mkdir ..\bin.$(GA_WINSYS)
 	cd core && nmake /f $(MAKEFILE) install && cd ..
 	cd module && nmake /f $(MAKEFILE) install && cd ..
 	cd server && nmake /f $(MAKEFILE) install && cd ..
 	cd client && nmake /f $(MAKEFILE) install && cd ..
+
+install_configuration:
 	@rem install configuration
 	-mkdir ..\bin.$(GA_WINSYS)\config
 	-mkdir ..\bin.$(GA_WINSYS)\config\common
