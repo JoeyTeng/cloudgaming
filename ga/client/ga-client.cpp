@@ -315,7 +315,8 @@ open_audio(struct RTSPThreadParam *rtspParam, AVCodecContext *adecoder) {
 		pthread_mutex_unlock(&rtspParam->audioMutex);
 		return;
 	}
-	if(SDL_OpenAudio(&wanted, &spec) < 0) {
+	SDL_AudioDeviceID deviceID = SDL_OpenAudioDevice(NULL, 0, &wanted, &spec, 0);
+	if(deviceID == 0) {
 		pthread_mutex_unlock(&rtspParam->audioMutex);
 		rtsperror("ga-client: open audio failed - %s\n", SDL_GetError());
 		return;
@@ -323,9 +324,9 @@ open_audio(struct RTSPThreadParam *rtspParam, AVCodecContext *adecoder) {
 	//
 	rtspParam->audioOpened = true;
 	//
-	SDL_PauseAudio(0);
+	SDL_PauseAudioDevice(deviceID, 0);
 	pthread_mutex_unlock(&rtspParam->audioMutex);
-	rtsperror("ga-client: audio device opened.\n");
+	rtsperror("ga-client: audio device opened with device ID: %d.\n", deviceID);
 	return;
 }
 

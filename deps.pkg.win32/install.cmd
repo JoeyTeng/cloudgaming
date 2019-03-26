@@ -26,7 +26,7 @@ xcopy /e /q /h /r /y ffmpeg-%FFMPEG%-win32-dev\include\* %GADEPS%\include\
 rmdir /s /q ffmpeg-%FFMPEG%-win32-dev
 @REM
 echo Installing SDL2 ...
-set SDL2=2.0.3
+set SDL2=2.0.9
 bin\7za x -y SDL2-devel-%SDL2%-VC.zip
 move /y SDL2-%SDL2%\lib\x86\*.dll %GADEPS%\bin\
 move /y SDL2-%SDL2%\include\*.h %GADEPS%\include\SDL2\
@@ -34,7 +34,7 @@ move /y SDL2-%SDL2%\lib\x86\*.lib %GADEPS%\lib\
 rmdir /s /q SDL2-%SDL2%
 @REM
 echo Installing SDL2_ttf ...
-set SDL2TTF=2.0.12
+set SDL2TTF=2.0.15
 bin\7za x -y SDL2_ttf-devel-%SDL2TTF%-VC.zip
 move /y SDL2_ttf-%SDL2TTF%\lib\x86\*.dll %GADEPS%\bin\
 move /y SDL2_ttf-%SDL2TTF%\include\*.h %GADEPS%\include\SDL2\
