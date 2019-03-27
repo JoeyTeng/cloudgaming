@@ -1264,7 +1264,7 @@ audio_buffer_fill(void *userdata, unsigned char *stream, int ssize) {
 	// audiobuf shall be empty at first with absize == abpos == 0
 	// so in the first iteration, audiobuf is filled
 	while(filled < ssize) {
-		int dsize = 0, delta = 0;;
+		int dsize = 0, delta = 0;
 		// buffer has enough data
 		if(absize - abpos >= ssize - filled) {
 			// buffer has enough data to fill into the stream

@@ -50,8 +50,8 @@ hook_and_launch(const char *ga_root, const char *config_path, const char *app_ex
 	// handle environment variables
 	// do {} while(0): create a local scope for temporary variables
 	do {
-		char s_drive[_MAX_DRIVE], s_dir[_MAX_DIR], s_fname[_MAX_FNAME];
-		_splitpath(app_exe, s_drive, s_dir, s_fname, NULL);
+		char s_fname[_MAX_FNAME];
+		_splitpath(app_exe, NULL, NULL, s_fname, NULL);
 		_putenv_s("GA_APPEXE", s_fname);
 		_putenv_s("GA_ROOT", ga_root);
 		_putenv_s("GA_CONFIG", config_path);

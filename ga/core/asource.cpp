@@ -95,34 +95,37 @@ audio_source_buffer_fill_one(audio_buffer_t *ab, const unsigned char *data, int 
 		return;
 	framesize = frames * ab->channels * ab->bitspersample / 8;
 	pthread_mutex_lock(&ab->bufmutex);
-retry:
-	headspace = ab->bufhead;
-	tailspace = ab->bufsize - ab->buftail;
-	if(framesize > headspace + tailspace) {
-		ga_error("Audio source: buffer overflow, packet dropped (%d frames)\n", frames);
-		pthread_mutex_unlock(&ab->bufmutex);
-		pthread_cond_signal(&ab->bufcond);
-		return;
-	}
-	// we GUARANTEE that bufhead <= buftail
-	if(framesize <= tailspace) {
-		// case #1: tailspace is sufficient, append at the end
-		if(data == NULL) {
-			bzero(&ab->buffer[ab->buftail], framesize);
-		} else {
-			bcopy(data, &ab->buffer[ab->buftail], framesize);
+	do {
+		headspace = ab->bufhead;
+		tailspace = ab->bufsize - ab->buftail;
+		if (framesize > headspace + tailspace) {
+			ga_error("Audio source: buffer overflow, packet dropped (%d frames)\n", frames);
+			pthread_mutex_unlock(&ab->bufmutex);
+			pthread_cond_signal(&ab->bufcond);
+			return;
 		}
-		ab->buftail += framesize;
-		ab->bframes += frames;
-		pthread_mutex_unlock(&ab->bufmutex);
-		pthread_cond_signal(&ab->bufcond);
-		return;
-	}
-	// case #2: framesize > tailspace, but overall space is sufficient
-	bcopy(&ab->buffer[ab->bufhead], ab->buffer, ab->buftail - ab->bufhead);
-	ab->buftail -= ab->bufhead;
-	ab->bufhead = 0;
-	goto retry;
+		// we GUARANTEE that bufhead <= buftail
+		if (framesize <= tailspace) {
+			// case #1: tailspace is sufficient, append at the end
+			if (data == NULL) {
+				bzero(&ab->buffer[ab->buftail], framesize);
+			}
+			else {
+				bcopy(data, &ab->buffer[ab->buftail], framesize);
+			}
+			ab->buftail += framesize;
+			ab->bframes += frames;
+			pthread_mutex_unlock(&ab->bufmutex);
+			pthread_cond_signal(&ab->bufcond);
+			return;
+		}
+		// case #2: framesize > tailspace, but overall space is sufficient
+		// solution: relocate all data in buffer towards [0], thus merging tail space with head space.
+		bcopy(&ab->buffer[ab->bufhead], ab->buffer, ab->buftail - ab->bufhead);
+		ab->buftail -= ab->bufhead;
+		ab->bufhead = 0;
+	// change unconditional "goto retry" to do while (1)
+	} while (1);
 	// never reach here
 	return;
 }
@@ -158,11 +161,7 @@ audio_source_buffer_read(audio_buffer_t *ab, unsigned char *buf, int frames) {
 		to.tv_nsec = tv.tv_usec * 1000;
 		pthread_cond_timedwait(&ab->bufcond, &ab->bufmutex, &to);
 	}
-	if(ab->bframes >= frames) {
-		copyframe = frames;
-	} else {
-		copyframe = ab->bframes;
-	}
+    copyframe = min(ab->bframes, frames);
 	if(copyframe > 0) {
 		copysize = copyframe * ab->channels * ab->bitspersample / 8;
 		//

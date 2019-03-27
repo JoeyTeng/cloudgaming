@@ -134,14 +134,10 @@ aencoder_init(void *arg) {
 			encoder->frame_size,
 			encoder->sample_fmt, 1/*no-alignment*/);
 #if 1
-	do {
-		int i = 0;
-		while(dstlines[i] > 0) {
+	for (int i = 0; dstlines[i] > 0; i++) {
 			ga_error("audio encoder: encoder_size=%d, frame_size=%d, dstlines[%d] = %d\n",
 				encoder_size, encoder->frame_size, i, dstlines[i]);
-			i++;
-		}
-	} while(0);
+	}
 #endif
 	// need live format conversion?
 	// encoder->sample_fmt = rtsp_audio_codec_format
