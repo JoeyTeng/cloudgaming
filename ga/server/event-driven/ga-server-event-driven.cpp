@@ -59,7 +59,7 @@ hook_and_launch(const char *ga_root, const char *config_path, const char *app_ex
 		if(ga_conf_mapsize("game-env") == 0)
 			break;
 		ga_conf_mapreset("game-env");
-		for(	ptr = ga_conf_mapkey("game-env", buf, sizeof(buf));
+		for(ptr = ga_conf_mapkey("game-env", buf, sizeof(buf));
 			ptr != NULL;
 			ptr = ga_conf_mapnextkey("game-env", buf, sizeof(buf))) {
 			//
@@ -85,7 +85,7 @@ hook_and_launch(const char *ga_root, const char *config_path, const char *app_ex
 		ga_conf_mapreset("game-argv");
 		// return value: size of buffer written
 		cmdpos = snprintf(cmdline, cmdspace, "\"%s\"", app_exe);
-		for(	ptr = ga_conf_mapkey("game-argv", buf, sizeof(buf));
+		for(ptr = ga_conf_mapkey("game-argv", buf, sizeof(buf));
 			ptr != NULL && cmdpos < cmdspace;
 			ptr = ga_conf_mapnextkey("game-argv", buf, sizeof(buf))) {
 			//
