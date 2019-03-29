@@ -86,6 +86,25 @@ ieee_float:
 	return AV_SAMPLE_FMT_NONE;
 }
 
+static WORD
+format_to_BitsPerSample(enum AVSampleFormat sample_fmt) {
+	switch (sample_fmt) {
+	case AV_SAMPLE_FMT_U8:
+		return 8;
+	case AV_SAMPLE_FMT_S16:
+		return 16;
+	case AV_SAMPLE_FMT_S32:
+	case AV_SAMPLE_FMT_FLT:
+		return 32;
+	case AV_SAMPLE_FMT_DBL:
+		return 64;
+	default:
+		ga_error("format_to_BitsPerSample: format %d is not supported.\n", sample_fmt);
+		exit(-1);
+	}
+	return -1;
+}
+
 static int64_t
 CA2SWR_chlayout(int channels) {
 	if(channels == 1)
@@ -151,7 +170,8 @@ ca_create_swrctx(WAVEFORMATEX *w) {
 		return -1;
 	}
 	if(audio_source_setup(bufreq, rtspconf->audio_samplerate,
-				16/* depends on format */,
+				// 16/* depends on format */,
+				format_to_BitsPerSample(rtspconf->audio_device_format),
 				rtspconf->audio_channels) < 0) {
 		ga_error("CoreAudio: audio source setup failed.\n");
 		return -1;
