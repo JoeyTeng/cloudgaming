@@ -52,6 +52,12 @@ unsigned increaseReceiveBufferTo(UsageEnvironment& env,
 #include <map>
 using namespace std;
 
+#define __DEBUG 0
+#if __DEBUG
+#define __DEBUG_AUDIO_BUFFER_FILL 0
+#define __DEBUG_AUDIO_BUFFER_DECODE 0
+#endif
+
 #ifndef	AVCODEC_MAX_AUDIO_FRAME_SIZE
 #define	AVCODEC_MAX_AUDIO_FRAME_SIZE	192000 // 1 second of 48khz 32bit audio
 #endif
@@ -1103,7 +1109,9 @@ audio_buffer_decode(AVPacket *pkt, unsigned char *dstbuf, int dstlen) {
 	int filled = 0; // length of data decoded (filled in dstbuf)
 	// static AVFrame *aframe = NULL; as global variable
 	//
-	rtsperror("audio decoder: calling audio_buffer_decode.\n");
+#if __DEBUG_AUDIO_BUFFER_DECODE
+    rtsperror("audio decoder: calling audio_buffer_decode.\n");
+#endif
 	saveptr = pkt->data; // used to reset the pointer after decoding
 	while(pkt->size > 0) {
 		int len, got_frame = 0;
@@ -1125,8 +1133,8 @@ audio_buffer_decode(AVPacket *pkt, unsigned char *dstbuf, int dstlen) {
 			pkt->data += len;
 			continue;
 		}
-		//
-		/*rtsperror("audio decoder: source sample rate == target sample rate: %d.\n",
+#if __DEBUG_AUDIO_BUFFER_DECODE
+		rtsperror("audio decoder: source sample rate == target sample rate: %d.\n",
 			aframe->sample_rate == rtspconf->audio_samplerate);
 		rtsperror("audio decoder: source: %dch(%x)@%dHz (%s); target: %dch(%x)@%dHz (%s).\n",
 			(int)aframe->channels, (int)aframe->channel_layout, (int)aframe->sample_rate,
@@ -1134,10 +1142,15 @@ audio_buffer_decode(AVPacket *pkt, unsigned char *dstbuf, int dstlen) {
 			(int)rtspconf->audio_channels,
 			(int)rtspconf->audio_device_channel_layout,
 			(int)rtspconf->audio_samplerate,
-			av_get_sample_fmt_name(rtspconf->audio_device_format));*/
+			av_get_sample_fmt_name(rtspconf->audio_device_format));
+#endif
 		if(aframe->format == rtspconf->audio_device_format) {
-			//&& aframe->sample_rate == rtspconf->audio_samplerate) {
+#if __DEBUG_AUDIO_BUFFER_DECODE
+            //&& aframe->sample_rate == rtspconf->audio_samplerate) {
+#endif
+#if __DEBUG_AUDIO_BUFFER_DECODE
 			rtsperror("audio decoder: no conversion.\n");
+#endif
 			datalen = av_samples_get_buffer_size(NULL,
 					aframe->channels/*rtspconf->audio_channels*/,
 					aframe->nb_samples,
@@ -1146,7 +1159,9 @@ audio_buffer_decode(AVPacket *pkt, unsigned char *dstbuf, int dstlen) {
 		} else {
 			// aframe->format != rtspconf->audio_device_format
 			// need conversion!
-			//rtsperror("audio decoder: has conversion.\n");
+#if __DEBUG_AUDIO_BUFFER_DECODE
+            rtsperror("audio decoder: has conversion.\n");
+#endif
 			if(swrctx == NULL) {
 				if((swrctx = swr_alloc_set_opts(NULL,
 						rtspconf->audio_device_channel_layout,
@@ -1249,7 +1264,9 @@ audio_buffer_fill(void *userdata, unsigned char *stream, int ssize) {
 	AVCodecContext *adecoder = (AVCodecContext*) userdata;
 #endif
 	//
-	rtsperror("audio decoder: calling audio_buffer_fill.\n");
+#if __DEBUG_AUDIO_BUFFER_FILL
+    rtsperror("audio decoder: calling audio_buffer_fill.\n");
+#endif
 
 	if(audio_buffer_init() == NULL) {
 		// init abuffer for decoding
@@ -1988,8 +2005,10 @@ DummySink::afterGettingFrame(void* clientData, unsigned frameSize, unsigned numT
 	sink->afterGettingFrame(frameSize, numTruncatedBytes, presentationTime, durationInMicroseconds);
 }
 
+#if __DEBUG
 // If you don't want to see debugging output for each received frame, then comment out the following line:
 #define DEBUG_PRINT_EACH_RECEIVED_FRAME 1
+#endif
 
 void
 DummySink::afterGettingFrame(unsigned frameSize, unsigned numTruncatedBytes,
@@ -2061,4 +2080,9 @@ DummySink::continuePlaying() {
 			onSourceClosure, this);
 	return True;
 }
+
+#if __DEBUG
+#undef __DEBUG_AUDIO_BUFFER_DECODE
+#endif
+#undef __DEBUG
 

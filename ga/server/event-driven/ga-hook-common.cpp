@@ -40,6 +40,12 @@
 #include <string>
 using namespace std;
 
+#define __DEBUG 0
+#if __DEBUG
+#define __DEBUG_GA_HOOK_FUNCTION 0
+#endif
+
+
 #define	BITSPERPIXEL		32
 #define	ENCODING_MOD_BASE	2
 
@@ -519,6 +525,9 @@ static map<string, TRACED_HOOK_HANDLE> hookdb;
 
 void
 ga_hook_function(const char *id, void *oldfunc, void *newfunc) {
+#if __DEBUG_GA_HOOK_FUNCTION
+	ga_error("[ga-hook]: DEBUG: hooking %s.\n", id);
+#endif
 	unsigned long thread_ids[] = { GA_HOOK_INVALID_THREADID };
 	TRACED_HOOK_HANDLE h = NULL;
 	//
@@ -545,7 +554,14 @@ ga_hook_function(const char *id, void *oldfunc, void *newfunc) {
 	//
 	hookdb[id] = h;
 	//
+#if __DEBUG_GA_HOOK_FUNCTION
+	ga_error("[ga-hook]: DEBUG: %s hooked.\n", id);
+#endif
 	return;
 }
 #endif	/* WIN32 */
 
+#if __DEBUG
+#undef __DEBUG_GA_HOOK_FUNCTION
+#endif
+#undef __DEBUG

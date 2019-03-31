@@ -31,6 +31,13 @@
 #include "ga-avcodec.h"
 #include "ga-module.h"
 
+#define __DEBUG 0
+#if __DEBUG
+#define __DEBUG_AENCODER_INIT 0
+#define __DEBUG_AENCODER_THREADPROC 1
+#define __DEBUG_AENCODER_THREADPROC_0 0
+#endif
+
 //MODULE EXPORT void * aencoder_threadproc(void *arg);
 
 static int aencoder_initialized = 0;
@@ -97,11 +104,33 @@ aencoder_init(void *arg) {
 			rtspconf->audio_channels,
 			rtspconf->audio_codec_format,
 			rtspconf->audio_codec_channel_layout);
+#if __DEBUG_AENCODER_INIT
+	ga_error("audio encoder: [aencoder_init]: DEBUG: encoder:\n"
+		"  rtspconf->audio_encoder_codec->name: %s\n"
+		"  rtspconf->audio_bitrate: %d\n"
+		"  rtspconf->audio_samplerate: %d\n"
+		"  rtspconf->audio_channels: %d\n"
+		"  rtspconf->audio_codec_format: %d\n"
+		"  rtspconf->audio_codec_channel_layout: %llx\n"
+		"  encoder->sample_fmt: %d\n",
+		rtspconf->audio_encoder_codec->name,
+		rtspconf->audio_bitrate,
+		rtspconf->audio_samplerate,
+		rtspconf->audio_channels,
+		rtspconf->audio_codec_format,
+		rtspconf->audio_codec_channel_layout,
+		encoder->sample_fmt);
+#endif
 	if(encoder == NULL) {
 		ga_error("audio encoder: cannot initialized the encoder.\n");
 		goto init_failed;
 	}
 	// encoder for SDP generation
+#if __DEBUG_AENCODER_INIT
+	ga_error("audio encoder: [aencoder_init]: DEBUG:\n"
+		"audio_encoder_coder->id: %d\n",
+		rtspconf->audio_encoder_codec->id);
+#endif
 	switch(rtspconf->audio_encoder_codec->id) {
 	case AV_CODEC_ID_AAC:
 		// need ctx with CODEC_FLAG_GLOBAL_HEADER flag
@@ -314,9 +343,15 @@ aencoder_threadproc(void *arg) {
 		nsamples += r;
 		samplebytes += r*frameunit;
 		offset = 0;
+#if __DEBUG_AENCODER_THREADPROC_0
+        ga_error("[aencoder_threadproc]: DEBUG: Start encoding.\n");
+#endif
         // only proceed when there is enough data for at least one frame.
         // the loop usually runs only one iteration since nsamples usually <= encoder->framesize
         while(nsamples >= encoder->frame_size) {
+#if __DEBUG_AENCODER_THREADPROC_0
+            ga_error("[aencoder_threadproc]: DEBUG: Encoding loop.\n");
+#endif
 			AVPacket pkt1, *pkt = &pkt1;
 			unsigned char *srcbuf;
 			int srcsize;
@@ -327,6 +362,12 @@ aencoder_threadproc(void *arg) {
 			snd_in->channel_layout = encoder->channel_layout;
 			//
 			// offset should always be 0 since the loop is always runned once only
+#if __DEBUG_AENCODER_THREADPROC_0
+            if (offset != 0) {
+                // no outputs for limbo+libopus & torchlight+libopus
+                ga_error("[aencoder_threadproc]: DEBUG: offset != 0");
+            }
+#endif
             srcbuf = samples+offset;
 			srcsize = source_size;
 			//
@@ -402,6 +443,10 @@ drop_audio_frame:
 			// should always be 0 since samples only store one frame of data
             // and this amount are consumed exactly during encoding process
             if(samplebytes-offset > 0) {
+#if __DEBUG_AENCODER_THREADPROC_0
+                // no outputs for limbo+libopus & torchlight+libopus
+                ga_error("[aencoder_threadproc]: DEBUG: Shifting remainder in samples to head.\n");
+#endif
                 // shift the remainder to the head
 				bcopy(&samples[offset], samples, samplebytes-offset);
 			}
@@ -466,3 +511,9 @@ module_load() {
 	return &m;
 }
 
+#if __DEBUG
+#undef __DEBUG_AENCODER_INIT
+#undef __DEBUG_AENCODER_THREADPROC
+#undef __DEBUG_AENCODER_THREADPROC_0
+#endif
+#undef __DEBUG
