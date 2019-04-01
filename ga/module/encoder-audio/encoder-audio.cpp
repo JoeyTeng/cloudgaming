@@ -252,7 +252,7 @@ aencoder_threadproc(void *arg) {
 	struct timeval baseT, currT;
 #endif
 	struct timeval tv;
-	long long pts = -1LL, newpts = 0LL, ptsOffset = 0LL, ptsSync = 0LL;
+	int64_t pts = -1LL, newpts = 0LL, ptsOffset = 0LL, ptsSync = 0LL;
 	//
 	audio_buffer_t *ab = NULL;
 	int audio_written = 0;

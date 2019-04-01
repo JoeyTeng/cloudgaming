@@ -60,7 +60,7 @@ typedef struct encoder_pts_s {
 
 typedef void (*qcallback_t)(int);
 
-EXPORT int encoder_pts_sync(int samplerate);
+EXPORT int64_t encoder_pts_sync(int samplerate);
 EXPORT int encoder_running();
 EXPORT int encoder_register_vencoder(ga_module_t *m, void *param);
 EXPORT int encoder_register_aencoder(ga_module_t *m, void *param);

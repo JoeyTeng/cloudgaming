@@ -56,7 +56,7 @@ static void *aencoder_param = NULL;	/**< Audio encoder parameter */
  * For an audio encoder, \a samplerate is the audio sample rate.
  * For a vieo encoder, \a samplerate is the video frame rate.
  */
-int	// XXX: need to be int64_t ?
+int64_t	// XXX: need to be int64_t ?
 encoder_pts_sync(int samplerate) {
 	struct timeval tv;
 	long long us;
