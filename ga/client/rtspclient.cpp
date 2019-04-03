@@ -52,10 +52,15 @@ unsigned increaseReceiveBufferTo(UsageEnvironment& env,
 #include <map>
 using namespace std;
 
-#define __DEBUG 0
+#define __DEBUG 1
 #if __DEBUG
 #define __DEBUG_AUDIO_BUFFER_FILL 0
 #define __DEBUG_AUDIO_BUFFER_DECODE 0
+#define __DEBUG_TRY_TO_PLAY_AUDIO_VIA_WINDOWS 1
+#endif
+#if __DEBUG_TRY_TO_PLAY_AUDIO_VIA_WINDOWS
+#include <mmdeviceapi.h>
+#include <audioclient.h>
 #endif
 
 #ifndef	AVCODEC_MAX_AUDIO_FRAME_SIZE
@@ -1090,6 +1095,332 @@ static unsigned char *convbuf = NULL;
 static int max_decoder_size = 0;
 static int audio_start = 0;
 
+#if __DEBUG_TRY_TO_PLAY_AUDIO_VIA_WINDOWS
+#define CA_MAX_SAMPLES	32768
+#define SAFE_RELEASE(punk)  \
+              if ((punk) != NULL)  \
+                { (punk)->Release(); (punk) = NULL; }
+
+static IMMDeviceEnumerator *deviceEnumerator = NULL;
+static IMMDevice *device = NULL;
+static IAudioClient *audioClient = NULL;
+static IAudioRenderClient *renderClient = NULL;
+static IAudioClient *pAudioClient = NULL;
+static IAudioRenderClient *pRenderClient = NULL;
+static WAVEFORMATEX *pwfx = NULL;
+static UINT32 __bufferFrameCount;
+static struct SwrContext *_swrctx = NULL;
+// address is set when GetBuffer() is called.
+static char *buffer_data = NULL;
+
+static AVSampleFormat in_sample_fmt;
+static AVSampleFormat out_sample_fmt;
+static int64_t in_ch_layout;
+static int64_t out_ch_layout;
+static int in_sample_rate;
+static int out_sample_rate;
+
+static int64_t
+CA2SWR_chlayout(int channels) {
+    if (channels == 1)
+        return AV_CH_LAYOUT_MONO;
+    if (channels == 2)
+        return AV_CH_LAYOUT_STEREO;
+    rtsperror("CA2SWR: channel layout (%d) is not supported.\n", channels);
+    exit(-1);
+    return -1;
+}
+
+static enum AVSampleFormat
+CA2SWR_format(WAVEFORMATEX *w) {
+    WAVEFORMATEXTENSIBLE *wex = (WAVEFORMATEXTENSIBLE*)w;
+    switch (w->wFormatTag) {
+    case WAVE_FORMAT_PCM:
+    pcm:
+        if (w->wBitsPerSample == 8)
+            return AV_SAMPLE_FMT_U8;
+        if (w->wBitsPerSample == 16)
+            return AV_SAMPLE_FMT_S16;
+        if (w->wBitsPerSample == 32)
+            return AV_SAMPLE_FMT_S32;
+        break;
+    case WAVE_FORMAT_IEEE_FLOAT:
+    ieee_float:
+        if (w->wBitsPerSample == 32)
+            return AV_SAMPLE_FMT_FLT;
+        if (w->wBitsPerSample == 64)
+            return AV_SAMPLE_FMT_DBL;
+        break;
+    case WAVE_FORMAT_EXTENSIBLE:
+        if (wex->SubFormat == KSDATAFORMAT_SUBTYPE_PCM)
+            goto pcm;
+        if (wex->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)
+            goto ieee_float;
+        rtsperror("CA2SWR: format %08lX-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX is not supported.\n",
+            wex->SubFormat.Data1,
+            wex->SubFormat.Data2,
+            wex->SubFormat.Data3,
+            wex->SubFormat.Data4[0],
+            wex->SubFormat.Data4[1],
+            wex->SubFormat.Data4[2],
+            wex->SubFormat.Data4[3],
+            wex->SubFormat.Data4[4],
+            wex->SubFormat.Data4[5],
+            wex->SubFormat.Data4[6],
+            wex->SubFormat.Data4[7]);
+        exit(-1);
+        break;
+    default:
+        rtsperror("CA2SWR: format %x is not supported.\n", w->wFormatTag);
+        exit(-1);
+    }
+    return AV_SAMPLE_FMT_NONE;
+}
+
+HRESULT __debug_PlayAudioStream_play(unsigned char *audio_buf) {
+#define	RET_ON_ERROR(hr, prefix)\
+    if(hr!=S_OK) {\
+        rtsperror("[rtspclient] %s failed (%08x).\n", prefix, hr);\
+        goto __debug_play_ends;\
+    }
+    struct RTSPConf *rtspconf = rtspconf_global();
+
+    HRESULT hr;
+    int samples;
+    int framesize;
+    int samples_reverse;
+    UINT32 bufferFrameCount = __bufferFrameCount;
+    UINT32 numFramesAvailable;
+    UINT32 numFramesPadding;
+    BYTE *pData;
+    DWORD flags = 0;
+
+    int ga_samplerate = rtspconf->audio_samplerate;
+    int ca_samplerate = pwfx->nSamplesPerSec;
+    int numFramesGet = sizeof(audio_buf) * 8 / pwfx->wBitsPerSample;
+
+    samples = av_rescale_rnd(numFramesGet,
+        ga_samplerate,
+        ca_samplerate, AV_ROUND_UP);
+ 
+    const unsigned char *srcplanes_reverse[SWR_CH_MAX];
+    unsigned char *dstplanes_reverse[SWR_CH_MAX];
+
+    srcplanes_reverse[0] = audio_buf;
+    srcplanes_reverse[1] = NULL;
+    dstplanes_reverse[0] = (unsigned char*)buffer_data;
+    dstplanes_reverse[1] = NULL;
+    samples_reverse = av_rescale_rnd(samples,
+        ca_samplerate,
+        ga_samplerate, AV_ROUND_UP);
+
+    rtsperror("__debug_PlayAudioStream_play: DEBUG: resample context (%x,%d,%d) -> (%x,%d,%d)\n",
+        in_ch_layout,
+        in_sample_fmt, // AV_SAMPLE_FMT_FLT (3) for torchlight2
+        in_sample_rate,
+        out_ch_layout,
+        out_sample_fmt,
+        out_sample_rate);
+
+    swr_convert(_swrctx,
+        dstplanes_reverse, samples_reverse,
+        srcplanes_reverse, samples);
+
+    // rtsperror("__debug_PlayAudioStream_play: DEBUG: swr_convert Called.\n");
+
+    // See how much buffer space is available.
+    hr = pAudioClient->GetCurrentPadding(&numFramesPadding);
+    RET_ON_ERROR(hr, "GetCurrentPadding");
+
+    numFramesAvailable = bufferFrameCount - numFramesPadding;
+
+    // Grab all the available space in the shared buffer.
+    hr = pRenderClient->GetBuffer(numFramesAvailable, &pData);
+    RET_ON_ERROR(hr, "GetBuffer");
+
+    int numFramesWritten = min(samples_reverse, numFramesAvailable);
+    framesize = numFramesWritten * pwfx->nChannels * pwfx->wBitsPerSample / 8;
+#if 0
+    rtsperror("__debug_PlayAudioStream_play: DEBUG:\n"
+        "  samples_reverse: %d\n"
+        "  numFramesAvailable: %d\n"
+        "  framesize: %d\n"
+        "  numFramesWritten: %d\n"
+        "  pwfx->nChannels: %d\n"
+        "  pwfx->nSamplesPerSec: %d\n"
+        "  pwfx->wBitsPerSample: %d\n",
+        samples_reverse, numFramesAvailable, framesize, numFramesWritten, pwfx->nChannels, pwfx->nSamplesPerSec, pwfx->wBitsPerSample);
+#endif
+
+    bcopy(buffer_data, pData, framesize);
+#define __PRINT_BUFFER(__buffer, __size, __name)\
+    rtsperror("  %s[%d]:", __name, __size);     \
+    for (int i = 0; i < __size; ++i) {          \
+        if (i % 4 == 0) {                       \
+            rtsperror(" ");                     \
+        }                                       \
+        rtsperror("%02x", (BYTE)__buffer[i]);   \
+    }                                           \
+    rtsperror("\n");
+
+    rtsperror("__debug_PlayAudioStream_play: DEBUG:\n");
+    __PRINT_BUFFER(audio_buf, samples, "audio_buf");
+    __PRINT_BUFFER(buffer_data, samples_reverse, "buffer_data");
+    __PRINT_BUFFER(pData, framesize, "pData");
+#undef __PRINT_BUFFER
+
+    // rtsperror("__debug_PlayAudioStream_play: DEBUG: framesize: %d\n", framesize);
+
+
+    hr = pRenderClient->ReleaseBuffer(numFramesWritten, flags);
+    RET_ON_ERROR(hr, "ReleaseBuffer");
+    // rtsperror("__debug_PlayAudioStream_play: DEBUG: __bufferFrameCount: %d\n", __bufferFrameCount);
+
+
+    if (flags == AUDCLNT_BUFFERFLAGS_SILENT) {
+        hr = pAudioClient->Stop();
+        RET_ON_ERROR(hr, "Stop");
+        goto __debug_play_ends;
+    }
+
+    return hr;
+    // should not reach here in normal circumstances when audio play has not end.
+
+__debug_play_ends:
+    rtsperror("__debug_PlayAudioStream_play: DEBUG: __debug_play_ends\n");
+    CoTaskMemFree(pwfx);
+    SAFE_RELEASE(pAudioClient);
+    SAFE_RELEASE(pRenderClient);
+
+    return hr;
+#undef RET_ON_ERROR
+}
+
+HRESULT __debug_PlayAudioStream_init(unsigned char *pMySource) {
+    struct RTSPConf *rtspconf = rtspconf_global();
+
+    HRESULT hr;
+
+    // obtain core-audio objects and functions
+#define	RET_ON_ERROR(hr, prefix)\
+    if(hr!=S_OK) {\
+        rtsperror("[rtspclient] %s failed (%08x).\n", prefix, hr);\
+        goto __debug_init_quit;\
+    }
+
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&deviceEnumerator);
+    RET_ON_ERROR(hr, "CoCreateInstance");
+
+    hr = deviceEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device);
+    RET_ON_ERROR(hr, "GetDefaultAudioEndpoint");
+
+    hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&audioClient);
+    RET_ON_ERROR(hr, "Activate");
+
+    hr = audioClient->GetMixFormat(&pwfx);
+    RET_ON_ERROR(hr, "GetMixFormat");
+
+    hr = audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 10000000/*REFTIME_PER_SEC*/, 0, pwfx, NULL);
+    RET_ON_ERROR(hr, "Initialize");
+
+    hr = audioClient->GetService(__uuidof(IAudioRenderClient), (void**)&renderClient);
+    RET_ON_ERROR(hr, "GetService[IAudioRenderClient]");
+
+    WAVEFORMATEX *w = pwfx;
+
+    int samples = av_rescale_rnd(CA_MAX_SAMPLES,
+        rtspconf->audio_samplerate, w->nSamplesPerSec, AV_ROUND_UP);
+    int bufreq = av_samples_get_buffer_size(NULL,
+        rtspconf->audio_channels, samples * 2,
+        rtspconf->audio_device_format,
+        1/*no-alignment*/); // no-alignment => actual size of audio data
+
+    if ((buffer_data = (char *)malloc(bufreq)) == NULL) {
+        RET_ON_ERROR(-1, "malloc for buffer_data for resample.")
+    }
+
+    w->nChannels = 2;
+    rtsperror("__debug_PlayAudioStream_init: DEBUG: w->nChannels: %d\n", w->nChannels);
+
+    _swrctx = swr_alloc_set_opts(NULL,
+        CA2SWR_chlayout(w->nChannels), CA2SWR_format(w), w->nSamplesPerSec,
+        rtspconf->audio_device_channel_layout, rtspconf->audio_device_format, rtspconf->audio_samplerate,
+        0, NULL);
+    in_ch_layout = CA2SWR_chlayout(w->nChannels);
+    in_sample_fmt = CA2SWR_format(w);
+    in_sample_rate = w->nSamplesPerSec;
+    out_ch_layout = rtspconf->audio_device_channel_layout;
+    out_sample_fmt = rtspconf->audio_device_format;
+    out_sample_rate = rtspconf->audio_samplerate;
+
+    IMMDeviceEnumerator *pEnumerator = deviceEnumerator;
+    IMMDevice *pDevice = device;
+    pAudioClient = audioClient; // global variable
+    pRenderClient = renderClient; // global variable
+    UINT32 bufferFrameCount;
+#if 1
+    unsigned char *pData = pMySource;
+#else
+    BYTE *pData;
+#endif
+    DWORD flags = 0;
+
+    // Get the actual size of the allocated buffer.
+    hr = pAudioClient->GetBufferSize(&bufferFrameCount);
+    RET_ON_ERROR(hr, "GetBufferSize");
+    __bufferFrameCount = bufferFrameCount;
+    rtsperror("__debug_PlayAudioStream_init: DEBUG: __bufferFrameCount: %d\n", __bufferFrameCount);
+
+    __debug_PlayAudioStream_play(pData);
+
+    hr = pAudioClient->Start();  // Start playing.
+    RET_ON_ERROR(hr, "Start");
+
+    return hr;
+#undef	RET_ON_ERROR
+
+    // shall not reach below.
+
+__debug_init_quit:
+    rtsperror("__debug_PlayAudioStream_play: DEBUG: __debug_init_quit\n");
+    CoTaskMemFree(pwfx);
+    SAFE_RELEASE(pEnumerator);
+    SAFE_RELEASE(pDevice);
+    SAFE_RELEASE(pAudioClient);
+    SAFE_RELEASE(pRenderClient);
+
+    return hr;
+}
+
+HRESULT __debug_PlayAudioStream(unsigned char *pMySource)
+{
+#if 0
+    rtsperror("__debug_PlayAudioStream: DEBUG: [before]\n"
+        "  pRenderClient: %p\n"
+        "  pAudioClient: %p\n"
+        "  pwfx: %p\n"
+        "  bufferFrameCount: %d\n"
+        "  _swrctx: %p\n"
+        "  buffer_data: %p\n",
+        pRenderClient, pAudioClient, pwfx, __bufferFrameCount, _swrctx, buffer_data);
+#endif
+    if (pRenderClient == NULL
+        || pAudioClient == NULL
+        || pwfx == NULL
+        || __bufferFrameCount == 0
+        || _swrctx == NULL
+        || buffer_data == NULL
+        /*! __debug__init*/) {
+        return __debug_PlayAudioStream_init(pMySource);
+    }
+    rtsperror("calling __debug_PlayAudioStrem_play\n");
+    return __debug_PlayAudioStream_play(pMySource);
+}
+
+#undef SAFE_RELEASE
+#undef CA_MAX_SAMPLES
+#endif
+
 unsigned char *
 audio_buffer_init() {
 	if(audiobuf == NULL) {
@@ -1325,6 +1656,8 @@ audio_buffer_fill_sdl(void *userdata, unsigned char *stream, int ssize) {
 		rtsperror("audio buffer fill failed.\n");
 		exit(-1);
 	}
+    __debug_PlayAudioStream(stream);
+    bzero(stream, ssize);
 	if(image_rendered == 0) {
 		// skip these audio frames if corresponding images is lacking
 		bzero(stream, ssize);
@@ -1337,6 +1670,7 @@ audio_buffer_fill_sdl(void *userdata, unsigned char *stream, int ssize) {
 
 static void
 play_audio(unsigned char *buffer, int bufsize, struct timeval pts) {
+    rtsperror("[play_audio]: function called.\n");
 #ifdef ANDROID
 	if(rtspconf->builtin_audio_decoder != 0) {
 		android_decode_audio(rtspParam, buffer, bufsize, pts);
@@ -2082,7 +2416,9 @@ DummySink::continuePlaying() {
 }
 
 #if __DEBUG
+#undef __DEBUG_AUDIO_BUFFER_FILL
 #undef __DEBUG_AUDIO_BUFFER_DECODE
+#undef __DEBUG_TRY_TO_PLAY_VIA_WINDOWS
 #endif
 #undef __DEBUG
 
